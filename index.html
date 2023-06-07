@@ -1,0 +1,49 @@
+<!--
+ * @Date: 2023-06-07 11:00:40
+ * @LastEditors: mason
+ * @LastEditTime: 2023-06-07 16:53:01
+ * @FilePath: \react-mini\index.html
+-->
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="/lib/babel.min.js"></script>
+    <title>REACT-COCO</title>
+</head>
+
+<body>
+    <div id="root"></div>
+    <script data-type="module" type="text/babel">
+        import { review } from '/react-coco/index.js'
+        import REACT_COCO from '/react-coco/index.js'
+        console.log(REACT_COCO)
+        window.addEventListener('load', () => {
+            const root = document.getElementById('root');
+            //Step Zero: Review
+            review(root);
+
+            //Step I: The createElement Function
+
+            // 1.js
+            // const element = REACT_COCO.createElement('div', null, 'test');
+
+            // 2.jsx
+            /** @jsx REACT_COCO.createElement */
+            const element = (
+                <div>
+                    Hello World
+                </div>
+            );
+
+
+            //Step II: The render Function
+            REACT_COCO.render(element, root);
+        });
+    </script>
+</body>
+
+</html>
