@@ -1,5 +1,5 @@
 //Step Zero: Review
-export const review = (container) => {
+const review = (container) => {
     const element = {
         type: 'h1',
         props: {
@@ -74,6 +74,8 @@ let nextUnitOfWork = null;//下一个工作单元
 let wipRoot = null;//当前组装的fiber树
 let currentRoot = null;//正在显示的fiber树
 let deletions = null;//删除的节点
+let wipFiber = null;
+let hookIndex = null;
 
 const render = (element, container) => {
     wipRoot = {
@@ -89,43 +91,21 @@ const render = (element, container) => {
 };
 
 const performUnitOfWork = (fiber) => {
-    //add dom node
-    if (!fiber.dom) {
-        fiber.dom = createDom(fiber)
-    }
+
 
     //Step V: Render and Commit Phases
     // if (fiber.parent) {
     //     fiber.parent.dom.appendChild(fiber.dom)
     // }
 
-    //create new fibers
-    const elements = fiber.props.children
-    //Step VI: Reconciliation
-    reconcileChildren(fiber, elements);
-
-    let index = 0
-    let prevSibling = null
-
-    while (index < elements.length) {
-        const element = elements[index]
-
-        const newFiber = {
-            type: element.type,
-            props: element.props,
-            parent: fiber,
-            dom: null,
-        }
-
-        if (index === 0) {
-            fiber.child = newFiber
-        } else {
-            prevSibling.sibling = newFiber
-        }
-
-        prevSibling = newFiber
-        index++
+    //Step VII: Function Components
+    const isFunctionComponent = fiber.type instanceof Function;
+    if (isFunctionComponent) {
+        updateFunctionComponent(fiber);
+    } else {
+        updateHostComponent(fiber);
     }
+
 
     //return next unit of work
     if (fiber.child) {
@@ -141,19 +121,38 @@ const performUnitOfWork = (fiber) => {
 
 };
 
+//Step VII: Function Components
+function updateFunctionComponent(fiber) {
+    wipFiber = fiber;
+    hookIndex = 0;
+    wipFiber.hooks = [];
+    const children = [fiber.type(fiber.props)];
+    reconcileChildren(fiber, children);
+}
+
+function updateHostComponent(fiber) {
+    //add dom node
+    if (!fiber.dom) {
+        fiber.dom = createDom(fiber)
+    }
+    //create new fibers
+    const elements = fiber.props.children
+    //Step VI: Reconciliation
+    reconcileChildren(fiber, elements);
+}
+
+const isProperty = key => key !== 'children' && !isEvent(key);
+//Step VI: Reconciliation
+const isGone = (prev, next) => key => !(key in next);
+const isNew = (prev, next) => key => prev[key] != next[key];
+const isEvent = key => key.startsWith('on');
+
 const createDom = (fiber) => {
     const dom = fiber.type === 'TEXT_ELEMENT'
         ? document.createTextNode('')
-        : document.createElement(element.type);
+        : document.createElement(fiber.type);
 
-    const isProperty = key => key !== 'children';
-
-    Object.keys(element.props)
-        .filter(isProperty)
-        .forEach(name => {
-            dom[name] = element.props[name];
-        });
-
+    updateDom(dom, {}, fiber.props)
     return dom
 }
 
@@ -172,7 +171,13 @@ function commitWork(fiber) {
     if (!fiber) {
         return
     }
-    const domParent = filter.parent.dom;
+
+    //Step VII: Function Components
+    let domParentFiber = fiber.parent;
+    while (!domParentFiber.dom) {
+        domParentFiber = domParentFiber.parent
+    }
+    const domParent = domParentFiber.dom;
 
     //Step VI: Reconciliation
     if (
@@ -180,8 +185,8 @@ function commitWork(fiber) {
         fiber.dom != null
     ) {
         domParent.append(fiber.dom);
-    } else if (filter.effectTag === 'DELETION') {
-        domParent.removeChild(fiber.dom);
+    } else if (fiber.effectTag === 'DELETION') {
+        commitDeletion(fiber, domParent);
     } else if (
         fiber.effectTag = 'UPDATE' &&
         fiber.dom != null
@@ -193,32 +198,190 @@ function commitWork(fiber) {
         )
     }
 
-
-    domParent.append(fiber.dom);
     commitWork(fiber.child);
     commitWork(fiber.sibling);
 }
 
+//Step VII: Function Components
+function commitDeletion(fiber, domParent) {
+    if (fiber.dom) {
+        domParent.removeChild(fiber.dom);
+    } else {
+        commitDeletion(fiber.child, domParent);
+    }
+}
+
+
 //Step VI: Reconciliation
-function updateDom(dom, prevSibling, nextProps) {
-    
+function updateDom(dom, prevProps, nextProps) {
+    // Remove old properties
+    Object.keys(prevProps)
+        .filter(isProperty)
+        .filter(isGone(prevProps, nextProps))
+        .forEach(name => {
+            dom[name] = '';
+        });
+
+    //Remove old or changed event listeners
+    Object.keys(prevProps)
+        .filter(isEvent)
+        .filter(
+            key =>
+                !(key in nextProps) ||
+                isNew(prevProps, nextProps)(key)
+        ).forEach(name => {
+            const eventType = name
+                .toLowerCase()
+                .substring(2);
+
+            dom.removeEventListener(
+                eventType,
+                prevProps[name]
+            );
+        });
+
+    //Set new or changed properties
+    Object.keys(nextProps)
+        .filter(isProperty)
+        .filter(isNew(prevProps, nextProps))
+        .forEach(name => {
+            dom[name] = nextProps[name];
+        });
+
+    //Add event listeners
+    Object.keys(nextProps)
+        .filter(isEvent)
+        .filter(isNew(prevProps, nextProps))
+        .forEach(name => {
+            const eventType = name
+                .toLowerCase()
+                .substring(2);
+
+            dom.addEventListener(
+                eventType,
+                nextProps[name]
+            )
+        });
 }
 
 
 function reconcileChildren(wipFiber, elements) {
 
-}
+    let index = 0
+    let oldFiber =
+        wipFiber.alternate && wipFiber.alternate.child;
+    let prevSibling = null
 
+    while (
+        index < elements.length ||
+        oldFiber != null
+    ) {
+        const element = elements[index]
+        let newFiber = null
+
+        const sameType =
+            oldFiber &&
+            element &&
+            element.type == oldFiber.type;
+
+        if (sameType) {
+            newFiber = {
+                type: oldFiber.type,
+                props: element.props,
+                parent: wipFiber,
+                dom: oldFiber.dom,
+                alternate: oldFiber,
+                effectTag: 'UPDATE'
+            }
+        }
+
+        if (element && !sameType) {
+            newFiber = {
+                type: element.type,
+                props: element.props,
+                dom: null,
+                parent: wipFiber,
+                alternate: null,
+                effectTag: 'PLACEMENT'
+            }
+        }
+
+        if (oldFiber && !sameType) {
+            oldFiber.effectTag = "DELETION"
+            deletions.push(oldFiber)
+        }
+
+        if (oldFiber) {
+            oldFiber = oldFiber.sibling
+        }
+
+
+        if (index === 0) {
+            wipFiber.child = newFiber
+        } else if (element) {
+            prevSibling.sibling = newFiber
+        }
+
+        prevSibling = newFiber
+        index++
+    }
+}
 
 function workLoop(deadline) {
+    let shouldYield = false;
+    while (nextUnitOfWork && !shouldYield) {
+        nextUnitOfWork = performUnitOfWork(
+            nextUnitOfWork
+        );
+        shouldYield = deadline.timeRemaining() < 1
+    }
 
+    if (!nextUnitOfWork && wipRoot) {
+        commitRoot()
+    }
+
+    requestIdleCallback(workLoop);
+}
+
+requestIdleCallback(workLoop);
+
+//Step VII: Function Components
+//Step VIII: Hooks
+function useState(initial) {
+    const oldHook =
+        wipFiber.alternate &&
+        wipFiber.alternate.hooks &&
+        wipFiber.alternate.hooks[hookIndex];
+
+    const hook = {
+        state: oldHook ? oldHook.state : initial,
+        queue: []
+    };
+
+    const actions = oldHook ? oldHook.queue : [];
+    actions.forEach(action => {
+        hook.state = action(hook.state);
+    });
+
+    const setState = action => {
+        hook.queue.push(action);
+        wipRoot = {
+            dom: currentRoot.dom,
+            props: currentRoot.props,
+            alternate: currentRoot
+        };
+        nextUnitOfWork = wipRoot;
+        deletions = [];
+    };
+
+    wipFiber.hooks.push(hook);
+    hookIndex++;
+    return [hook.state, setState]
 }
 
 
-
-const REACT_COCO = {
+var REACT_COCO = {
     createElement,
-    render
+    render,
+    useState
 }
-
-export default REACT_COCO
