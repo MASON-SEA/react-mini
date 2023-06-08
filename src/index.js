@@ -38,12 +38,10 @@ const rerender = value => {
         <div>
             <input onInput={updateValue} value={value} />
             <h2>Hello {value}</h2>
+            <Counter />
         </div>
     )
     REACT_COCO.render(element, root)
 }
 
 rerender('test');
-
-/**@jsx REACT_COCO.createElement */
-REACT_COCO.render(<Counter />, root);
